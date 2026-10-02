@@ -19,6 +19,12 @@ class MultiHeadAttention(nn.Module):
 
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
 
+        # Disabled during normal training/evaluation.  The visualization
+        # utility enables this flag temporarily to expose the learned
+        # intra-modal dependency weights without changing model outputs.
+        self.record_attention = False
+        self.last_attention_probs = None
+
     def transpose_for_scores(self, x):
         new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
         x = x.view(*new_x_shape)
@@ -46,6 +52,11 @@ class MultiHeadAttention(nn.Module):
 
         # Normalize the attention scores to probabilities.
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
+
+        if self.record_attention:
+            # Record the probabilities before dropout so that the exported
+            # maps are deterministic when the model is in evaluation mode.
+            self.last_attention_probs = attention_probs.detach()
 
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.

@@ -1,5 +1,5 @@
 # CSAN
-CSAN: Cascaded Structural-Aware Network for Image-Text Matching
+CSAN: Cascaded Structure-Aware Network for Image-Text Matching
 # Introduction
 The framework of CSAN:
 
@@ -53,6 +53,53 @@ python train.py
 ```
 python evaluation.py
 ```
+
+# GAFM interpretability visualization
+
+`visualize_gafm.py` exposes the intermediate evidence produced by the two GAFM
+components without changing checkpoint parameters or retrieval scores. For each
+matched image-caption pair, it exports:
+
+- ITE image-region and word-word dependency attention;
+- ASM region-wise modulation strength and the distributions of its learned
+  gamma/beta parameters;
+- region-word cosine-similarity maps before ITE, after ITE, and after the full
+  ITE+ASM pipeline;
+- a PNG figure, an NPZ file containing the plotted values, and JSON metadata.
+
+Run it with the same checkpoint, precomputed features, and BERT vocabulary used
+for evaluation:
+
+```
+python visualize_gafm.py \
+  --checkpoint ./runs/model_best.pth.tar \
+  --data_path ./data \
+  --data_name f30k_precomp \
+  --bert_path ./uncased_L-12_H-768_A-12/ \
+  --split test \
+  --caption_index 0 25 50 \
+  --output_dir ./gafm_visualizations
+```
+
+The SCAN precomputed package contains region features but not the corresponding
+box coordinates, so the command above directly produces index-based region
+visualizations. To overlay ASM strengths and the strongest ITE relations on an
+original image, provide a single image and its Faster R-CNN boxes:
+
+```
+python visualize_gafm.py \
+  --checkpoint ./runs/model_best.pth.tar \
+  --data_path ./data \
+  --bert_path ./uncased_L-12_H-768_A-12/ \
+  --split test \
+  --caption_index 0 \
+  --image ./images/example.jpg \
+  --boxes_file ./test_boxes.npy
+```
+
+`test_boxes.npy` may have shape `[36, 4]` for the selected image or
+`[num_images, 36, 4]` for the full split. Coordinates must follow
+`[x1, y1, x2, y2]`; normalized coordinates are also accepted.
 
 
 

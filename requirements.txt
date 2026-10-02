@@ -91,6 +91,7 @@ python-dateutil==2.8.2
 pytz==2021.3
 pyu2f @ file:///home/conda/feedstock_root/build_artifacts/pyu2f_1604248910016/work
 PyYAML==6.0
+pytorch-pretrained-bert==0.6.2
 pyzmq==24.0.1
 regex==2022.7.9
 requests @ file:///home/conda/feedstock_root/build_artifacts/requests_1661872987712/work

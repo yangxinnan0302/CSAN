@@ -158,15 +158,14 @@ class VisualSA(nn.Module):
         self._init_weights()
 
     def _init_weights(self):
-        for embeddings in self.children():
-            for m in embeddings:
-                if isinstance(m, nn.Linear):
-                    r = np.sqrt(6.0) / np.sqrt(m.in_features + m.out_features)
-                    m.weight.data.uniform_(-r, r)
-                    m.bias.data.fill_(0)
-                elif isinstance(m, nn.BatchNorm1d):
-                    m.weight.data.fill_(1)
-                    m.bias.data.zero_()
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                r = np.sqrt(6.0) / np.sqrt(m.in_features + m.out_features)
+                m.weight.data.uniform_(-r, r)
+                m.bias.data.fill_(0)
+            elif isinstance(m, nn.BatchNorm1d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
 
     def forward(self, local, raw_global):
         l_emb = self.embedding_local(local)
@@ -206,15 +205,14 @@ class TextSA(nn.Module):
         self._init_weights()
 
     def _init_weights(self):
-        for embeddings in self.children():
-            for m in embeddings:
-                if isinstance(m, nn.Linear):
-                    r = np.sqrt(6.0) / np.sqrt(m.in_features + m.out_features)
-                    m.weight.data.uniform_(-r, r)
-                    m.bias.data.fill_(0)
-                elif isinstance(m, nn.BatchNorm1d):
-                    m.weight.data.fill_(1)
-                    m.bias.data.zero_()
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                r = np.sqrt(6.0) / np.sqrt(m.in_features + m.out_features)
+                m.weight.data.uniform_(-r, r)
+                m.bias.data.fill_(0)
+            elif isinstance(m, nn.BatchNorm1d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
 
     def forward(self, local, raw_global):
         l_emb = self.embedding_local(local)
@@ -435,6 +433,15 @@ class ADAPT(nn.Module):
             self.fc_gamma = nn.Sequential(nn.Linear(q1_size, v1_size // groups))
             self.fc_beta  = nn.Sequential(nn.Linear(q1_size, v1_size // groups))
 
+        # Visualization hooks are opt-in and therefore add no tensor-copying
+        # overhead to normal training or evaluation.
+        self.record_modulation = False
+        self.last_input = None
+        self.last_output = None
+        self.last_delta = None
+        self.last_gamma = None
+        self.last_beta = None
+
     def forward(self, value1, value2, query1, query2):
         B,  D,  rk = value1.shape
         Bv, Dv     = query1.shape
@@ -450,6 +457,14 @@ class ADAPT(nn.Module):
         # All three sg_type branches produce the same result; unified here.
         normalized = value1 * (gammas + 1) + betas
         normalized = normalized.view(B, Dv, -1)
+
+        if self.record_modulation:
+            value1_flat = value1.view(B, Dv, -1)
+            self.last_input = value1_flat.detach()
+            self.last_output = normalized.detach()
+            self.last_delta = (normalized - value1_flat).detach()
+            self.last_gamma = gammas.detach()
+            self.last_beta = betas.detach()
         return normalized
 
 
@@ -758,6 +773,11 @@ class CSAN(nn.Module):
 
         self.Eiters = 0
 
+        # Cache used only by visualize_gafm.py.  It is deliberately excluded
+        # from checkpoints and remains empty unless explicitly enabled.
+        self._record_visualization = False
+        self._visualization_cache = {}
+
     # ------------------------------------------------------------------
     # Checkpoint helpers
     # ------------------------------------------------------------------
@@ -796,6 +816,49 @@ class CSAN(nn.Module):
     # Forward passes
     # ------------------------------------------------------------------
 
+    def enable_visualization(self, enabled=True):
+        """Enable or disable lightweight GAFM interpretability hooks."""
+        self._record_visualization = enabled
+        self._visualization_cache = {}
+
+        for gat_stream in (self.GAT_model.gat_img, self.GAT_model.gat_cap):
+            for layer in gat_stream.encoder:
+                layer.mha.record_attention = enabled
+                layer.mha.last_attention_probs = None
+
+        self.sim_enc.adapt_txt.record_modulation = enabled
+        if not enabled:
+            adapt = self.sim_enc.adapt_txt
+            adapt.last_input = None
+            adapt.last_output = None
+            adapt.last_delta = None
+            adapt.last_gamma = None
+            adapt.last_beta = None
+
+    def get_visualization_cache(self, cpu=True):
+        """Return the tensors recorded by the most recent single-pair pass."""
+        cache = dict(self._visualization_cache)
+
+        img_mha = self.GAT_model.gat_img.encoder[-1].mha
+        cap_mha = self.GAT_model.gat_cap.encoder[-1].mha
+        if img_mha.last_attention_probs is not None:
+            cache['ite_image_attention'] = img_mha.last_attention_probs
+        if cap_mha.last_attention_probs is not None:
+            cache['ite_text_attention'] = cap_mha.last_attention_probs
+
+        adapt = self.sim_enc.adapt_txt
+        for name in ('input', 'output', 'delta', 'gamma', 'beta'):
+            value = getattr(adapt, 'last_' + name)
+            if value is not None:
+                cache['asm_' + name] = value
+
+        if cpu:
+            cache = {
+                key: value.detach().cpu() if torch.is_tensor(value) else value
+                for key, value in cache.items()
+            }
+        return cache
+
     def forward_emb(self, images, captions, lengths):
         """Compute image and caption embeddings."""
         if torch.cuda.is_available():
@@ -804,12 +867,25 @@ class CSAN(nn.Module):
 
         img_embs = self.img_enc(images)
         cap_embs = self.txt_enc(captions, lengths)
+        if self._record_visualization:
+            self._visualization_cache = {
+                'image_before_ite': img_embs.detach(),
+                'text_before_ite': cap_embs.detach(),
+            }
         img_emb, cap_emb = self.GAT_model(img_embs, cap_embs)
+        if self._record_visualization:
+            self._visualization_cache.update({
+                'image_after_ite': img_emb.detach(),
+                'text_after_ite': cap_emb.detach(),
+            })
         return img_emb, cap_emb, lengths
 
     def forward_sim(self, opt, img_embs, cap_embs, cap_lens):
         """Compute similarity scores."""
-        return self.sim_enc(opt, img_embs, cap_embs, cap_lens)
+        scores = self.sim_enc(opt, img_embs, cap_embs, cap_lens)
+        if self._record_visualization:
+            self._visualization_cache['similarity_score'] = scores.detach()
+        return scores
 
     def forward_loss(self, sims):
         """Compute contrastive loss."""
