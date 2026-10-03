@@ -8,7 +8,7 @@ def parse_opt():
     parser = argparse.ArgumentParser()
     # --------------------------- glo_data path -------------------------#
 
-    parser.add_argument('--data_path', default='../autodl-tmp/data',
+    parser.add_argument('--data_path', default='/root/autodl-tmp/data',
                         help='path to datasets')
                         
     parser.add_argument('--data_name', default='f30k_precomp',
@@ -88,7 +88,7 @@ def parse_opt():
                         help='step of RAR')
     parser.add_argument('--agg_func', default="LogSumExp",
                         help='LogSumExp|Mean|Max|Sum')
-    parser.add_argument('--attn_type', default='t2i',
+    parser.add_argument('--attn_type', default='i2t'
                         help='{t2i,i2t}')
     parser.add_argument('--t2i_smooth', default=10.0, type=float,
                         help='The value of t2i softmax lambda')

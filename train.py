@@ -12,7 +12,7 @@ from pathlib import Path
 import data
 import opts
 
-from model import CSAN
+from model_copy import CSAN
 from evaluation import i2t, t2i, AverageMeter, LogCollector, encode_data, shard_attn_scores
 
 import logging

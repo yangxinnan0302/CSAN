@@ -24,7 +24,7 @@ from PIL import Image
 import torch
 
 from data import PrecompDataset, get_tokenizer
-from model import CSAN
+from model_copy import CSAN
 
 
 SPECIAL_TOKENS = {"[CLS]", "[SEP]", "[PAD]"}
@@ -68,6 +68,99 @@ def decode_caption(value):
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return str(value)
+
+
+def read_nonempty_lines(path):
+    with open(path, "r", encoding="utf-8") as stream:
+        return [line.strip() for line in stream if line.strip()]
+
+
+def append_unique(values, value):
+    if value is None:
+        return
+    value = str(value).strip()
+    if value and value not in values:
+        values.append(value)
+
+
+def resolve_original_image(explicit_image, dataset_path, split,
+                           caption_index, image_id,
+                           num_captions, num_images):
+    """Locate the raw Flickr30K image associated with a caption.
+
+    The function supports test_ids.txt containing either one entry per image
+    or one entry per caption, and id_mapping.json stored in either direction.
+    """
+    if explicit_image is not None:
+        image_path = Path(explicit_image)
+        if not image_path.is_file():
+            raise FileNotFoundError("Image not found: {}".format(image_path))
+        return str(image_path.resolve())
+
+    dataset_path = Path(dataset_path)
+    ids_path = dataset_path / ("{}_ids.txt".format(split))
+    mapping_path = dataset_path / "id_mapping.json"
+
+    values = []
+    append_unique(values, image_id)
+
+    if ids_path.is_file():
+        split_ids = read_nonempty_lines(ids_path)
+        if len(split_ids) == num_captions:
+            append_unique(values, split_ids[caption_index])
+        elif len(split_ids) == num_images:
+            append_unique(values, split_ids[image_id])
+        elif image_id < len(split_ids):
+            append_unique(values, split_ids[image_id])
+
+    if mapping_path.is_file():
+        with mapping_path.open("r", encoding="utf-8") as stream:
+            mapping = json.load(stream)
+
+        lookup_values = list(values)
+        if isinstance(mapping, dict):
+            # Support {id: filename} and {filename: id} mappings.
+            for value in lookup_values:
+                if value in mapping:
+                    append_unique(values, mapping[value])
+            for key, value in mapping.items():
+                if str(value) in lookup_values:
+                    append_unique(values, key)
+        elif isinstance(mapping, list) and image_id < len(mapping):
+            append_unique(values, mapping[image_id])
+
+    names = []
+    for value in values:
+        name = Path(value).name
+        append_unique(names, name)
+        if Path(name).suffix == "":
+            append_unique(names, name + ".jpg")
+            append_unique(names, name + ".jpeg")
+            append_unique(names, name + ".png")
+
+    image_roots = (
+        dataset_path / "flickr30k-images",
+        dataset_path / "flickr30k-images1",
+        dataset_path / "images",
+    )
+
+    # Prefer direct lookup because it is much faster than recursive search.
+    for image_root in image_roots:
+        for name in names:
+            candidate = image_root / name
+            if candidate.is_file():
+                return str(candidate.resolve())
+
+    # Accommodate archives that contain another directory level.
+    for image_root in image_roots:
+        if not image_root.is_dir():
+            continue
+        for name in names:
+            match = next(image_root.rglob(name), None)
+            if match is not None:
+                return str(match.resolve())
+
+    return None
 
 
 def cosine_matrix(regions, words, eps=1e-8):
@@ -207,6 +300,22 @@ def export_visualization(model, opt, dataset, tokenizer, caption_index, args):
     image_tensor = image_features.unsqueeze(0)
     caption_length = len(caption_ids)
 
+    dataset_path = os.path.join(opt.data_path, opt.data_name)
+    image_path = resolve_original_image(
+        args.image,
+        dataset_path,
+        args.split,
+        caption_index,
+        int(image_id),
+        len(dataset),
+        int(dataset.images.shape[0]),
+    )
+    if image_path is None:
+        print("Warning: original image could not be resolved for caption {}."
+              .format(caption_index))
+    else:
+        print("Resolved original image: {}".format(image_path))
+
     model.enable_visualization(True)
     with torch.no_grad():
         image_after_ite, text_after_ite, lengths = model.forward_emb(
@@ -266,8 +375,8 @@ def export_visualization(model, opt, dataset, tokenizer, caption_index, args):
     stem = "gafm_caption_{:05d}".format(caption_index)
 
     figure, axes = plt.subplots(2, 4, figsize=(21, 10.5), constrained_layout=True)
-    if args.image is not None:
-        draw_region_overlay(axes[0, 0], args.image, boxes, image_attention,
+    if image_path is not None:
+        draw_region_overlay(axes[0, 0], image_path, boxes, image_attention,
                             modulation, args.top_edges)
     else:
         draw_region_bar(axes[0, 0], modulation)
@@ -341,6 +450,7 @@ def export_visualization(model, opt, dataset, tokenizer, caption_index, args):
         "caption": raw_caption,
         "tokens": tokens,
         "similarity_score": score,
+        "image_path": image_path,
         "checkpoint": os.path.abspath(args.checkpoint),
         "figure": str(figure_path.resolve()),
         "arrays": str(arrays_path.resolve()),
@@ -376,8 +486,12 @@ def main():
 
     model = CSAN(opt)
     model.load_state_dict(checkpoint["model"])
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
     model.val_start()
-    print("Loaded checkpoint from epoch {}".format(checkpoint.get("epoch", "unknown")))
+    print("Loaded checkpoint from epoch {} on {}".format(
+        checkpoint.get("epoch", "unknown"), device
+    ))
 
     for caption_index in args.caption_index:
         export_visualization(model, opt, dataset, tokenizer, caption_index, args)

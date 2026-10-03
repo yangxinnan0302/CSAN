@@ -10,7 +10,7 @@ import numpy as np
 
 from data import get_test_loader
 from vocab import Vocabulary, deserialize_vocab
-from model_1 import CSAN
+from model_copy import CSAN
 from collections import OrderedDict
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -478,6 +478,6 @@ def t2i(images, captions, caplens, sims, npts=None, return_ranks=False):
 
 if __name__ == '__main__':
     ## new_length_coco: bert _ batch
-    evalrank("./newFolderName/MSCOCO_t2i_1024_50/model_best.pth.tar",
+    evalrank("/root/runs/bert_f30k/glo/Mon_Nov__3_12-25-53_2025-zong/model_best.pth.tar",
                       # "./runs/bert_f30kSGR/glo/Mon_Nov_20_07-33-01_2023/checkpoint_20.pth.tar",
-                      data_path='./data', split="test", fold5=True)
+                      data_path='/root/autodl-tmp/data', split="test", fold5=False)
