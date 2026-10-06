@@ -88,7 +88,7 @@ def parse_opt():
                         help='step of RAR')
     parser.add_argument('--agg_func', default="LogSumExp",
                         help='LogSumExp|Mean|Max|Sum')
-    parser.add_argument('--attn_type', default='i2t'
+    parser.add_argument('--attn_type', default='i2t',
                         help='{t2i,i2t}')
     parser.add_argument('--t2i_smooth', default=10.0, type=float,
                         help='The value of t2i softmax lambda')
@@ -98,3 +98,4 @@ def parse_opt():
     opt = parser.parse_args()
     print(opt)
     return opt
+

@@ -54,6 +54,57 @@ python train.py
 python evaluation.py
 ```
 
+# Efficiency analysis
+
+`efficiency.py` reports the quantities needed for a reproducible efficiency
+comparison: total/trainable parameters, component-level parameters, FLOPs,
+inference latency, throughput, and peak GPU memory. It also optionally measures
+the peak memory of one forward/backward training step.
+
+Install the FLOP-counting dependency:
+
+```
+pip install -r requirements-efficiency.txt
+```
+
+Measure single-pair FP32 inference and a training step with batch size 64:
+
+```
+python efficiency.py \
+  --bert_path ./uncased_L-12_H-768_A-12/ \
+  --checkpoint ./runs/model_best.pth.tar \
+  --device cuda \
+  --precision fp32 \
+  --batch_size 1 \
+  --train_batch_size 64 \
+  --num_regions 36 \
+  --seq_len 32 \
+  --warmup 20 \
+  --iterations 100 \
+  --output efficiency_results.json \
+  --csv_output efficiency_results.csv
+```
+
+For throughput at the evaluation shard size, repeat the measurement with
+`--batch_size 32`. The model produces a `B x B` similarity matrix, so the JSON
+distinguishes aligned inputs per second from candidate-pair scores per second.
+
+Important reporting conventions:
+
+- Inputs are 36 precomputed 2048-dimensional BUTD region features and 32 BERT
+  token IDs. The offline Faster R-CNN detector is not included.
+- `fvcore` treats one fused multiply-add (FMA) as one operation. The script also
+  reports the converted value when a multiply and an add are counted as two
+  FLOPs.
+- Review `flops.unsupported_ops` in the generated JSON before quoting FLOPs. An
+  empty mapping means all encountered operators were supported by the profiler.
+- Latency includes synchronization before and after every timed iteration. Use
+  the same GPU, precision, software environment, input dimensions, warm-up, and
+  iteration count for every compared method.
+- The checkpoint is optional for complexity measurement because weights do not
+  affect parameter counts or FLOPs, but using the evaluated checkpoint is
+  recommended for a fully traceable experiment.
+
 # GAFM interpretability visualization
 
 `visualize_gafm.py` exposes the intermediate evidence produced by the two GAFM
