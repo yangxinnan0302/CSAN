@@ -104,7 +104,28 @@ Important reporting conventions:
 - The checkpoint is optional for complexity measurement because weights do not
   affect parameter counts or FLOPs, but using the evaluated checkpoint is
   recommended for a fully traceable experiment.
+# IDIN stage-wise alignment analysis
 
+`analyze_idin_stages.py` records the region-word attention at every recursive
+IDIN stage, renders alignment trajectories, and computes stability/drift
+metrics. With manual word-region labels it additionally computes stage-wise
+alignment accuracy, early-error correction rate, and regression rate.
+
+```bash
+python analyze_idin_stages.py \
+  --checkpoint ./runs/model_best.pth.tar \
+  --data_path ./data \
+  --data_name f30k_precomp \
+  --bert_path ./uncased_L-12_H-768_A-12/ \
+  --split test \
+  --caption_index 0 25 50 \
+  --output_dir ./idin_stage_analysis
+```
+
+See [`docs/IDIN_STAGE_ANALYSIS.md`](docs/IDIN_STAGE_ANALYSIS.md) for metric
+definitions, verified-error annotation format, image/box overlays, experiment
+design, and a reviewer-response template. Changed alignments are deliberately
+reported as unverified candidates unless word-region ground truth is supplied.
 # GAFM interpretability visualization
 
 `visualize_gafm.py` exposes the intermediate evidence produced by the two GAFM
